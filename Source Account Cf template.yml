@@ -1,0 +1,456 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for ECR repository cross-account/cross-region copy using Lambda container image and Step Functions
+
+Parameters:
+  SourceAccountId:
+    Type: String
+    Default: '1111111111'
+    Description: AWS Account ID where source ECR repositories are located
+
+  DestinationAccountId:
+    Default: '2222222222'
+    Description: AWS Account ID where ECR repositories will be copied to
+
+  DestinationRegion:
+    Type: String
+    Default: eu-west-2
+    Description: AWS Region where ECR repositories will be copied to
+    AllowedValues: 
+    - eu-west-1
+    - eu-west-2
+    - us-east-1
+    - us-east-2
+
+  SourceRegion:
+    Type: String
+    Default: eu-west-2
+    Description: AWS Region where source ECR repositories are located
+    AllowedValues: 
+      - eu-west-1
+      - eu-west-2
+      - us-east-1
+      - us-east-2
+
+  NotificationEmail:
+    Type: String
+    Description: Email address(es) to notify when ECR copy is completed
+    Default: xxxxx@company.com
+    AllowedPattern: ^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$
+
+  RepositoryList:
+    Type: CommaDelimitedList
+    Default: "php-nginx,docker-repo"
+    Description: Comma-separated list of ECR repositories to copy
+    AllowedPattern: ^$|^[a-zA-Z0-9_.-]+([, ]*[a-zA-Z0-9_.-]+)*$
+
+  LambdaImageUri:
+    Type: String
+    Description: ECR URI for Lambda container image
+    Default: ${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/ecr-copy-lambda:latest
+    AllowedPattern: ^$|[a-zA-Z0-9_.-]+\.dkr\.ecr\.[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+:[a-zA-Z0-9_.-]+
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: 
+      - dev
+      - test 
+      - prod
+      
+Resources:
+  ECRLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ECRContainerLambdaRole
+      Description: Role for ECR Copy Lambda Function
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECRLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                Resource: !GetAtt ECRRepositoryListTable.Arn
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:DescribeRepositories
+                  - ecr:ListImages
+                  - ecr:ListTagsForResource
+                  - ecr:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref CompletionTopic
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !Sub "arn:aws:iam::${DestinationAccountId}:role/ECRCrossAccountDestinationRole"                
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  ECRRepositoryListTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-ECRRepositoryList"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: repository
+          AttributeType: S
+        - AttributeName: imageTag
+          AttributeType: S
+      KeySchema:
+        - AttributeName: repository
+          KeyType: HASH
+        - AttributeName: imageTag
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  CompletionTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: ECR Repository Copy Completion
+      Subscription:
+        - Endpoint: !Ref NotificationEmail
+          Protocol: email
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  ECRImageCopyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-ECRImageCopy"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref LambdaImageUri
+      Timeout: 900
+      MemorySize: 2048
+      Role: !GetAtt ECRLambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          SOURCE_REGION: !Ref SourceRegion
+          DEST_REGION: !Ref DestinationRegion
+          SOURCE_ACCOUNT_ID: !Ref SourceAccountId
+          DEST_ACCOUNT_ID: !Ref DestinationAccountId
+          DEST_ROLE_ARN: !Sub arn:aws:iam::${DestinationAccountId}:role/ECRCrossAccountDestinationRole
+          NOTIFY_TOPIC: !Ref CompletionTopic
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  PopulateECRRepositoryList:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-PopulateECRRepositoryList"
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 300
+      MemorySize: 256
+      Role: !GetAtt ECRLambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DDB_TABLE: !Ref ECRRepositoryListTable
+          REPOSITORIES: !Join [',', !Ref RepositoryList]
+      Code:
+        ZipFile: |
+          import boto3, os, logging
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              ddb = boto3.resource('dynamodb')
+              table = ddb.Table(os.environ['DDB_TABLE'])
+              ecr = boto3.client('ecr')
+              
+              try:
+                  repos = os.environ['REPOSITORIES'].split(',')
+                  inserted_count = 0
+
+                  for repo in repos:
+                      repo = repo.strip()
+                      try:
+                          paginator = ecr.get_paginator('list_images')
+                          for page in paginator.paginate(repositoryName=repo):
+                              for image in page['imageIds']:
+                                  if 'imageTag' in image:
+                                      try:
+                                          table.put_item(Item={
+                                              "repository": repo,
+                                              "imageTag": image['imageTag']
+                                          })
+                                          inserted_count += 1
+                                      except ClientError as e:
+                                          logger.error(f"Failed to write to DynamoDB: {e}")
+                                          continue
+
+                      except ecr.exceptions.RepositoryNotFoundException:
+                          logger.warning(f"Repository {repo} not found")
+                          continue
+                      except ClientError as e:
+                          logger.error(f"Error accessing ECR repository {repo}: {e}")
+                          continue
+
+                  return {"inserted": inserted_count}
+
+              except Exception as e:
+                  logger.error(f"Unexpected error: {e}")
+                  raise
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  StepFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: 
+                  - !GetAtt ECRImageCopyFunction.Arn
+                  - !GetAtt PopulateECRRepositoryList.Arn
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource: !GetAtt ECRRepositoryListTable.Arn
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref CompletionTopic
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: '*'
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  StepFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/stepfunctions/${AWS::StackName}-ECRRepositoryCopy"
+      RetentionInDays: 14
+
+  ECRRepositoryCopyStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${AWS::StackName}-ECRRepositoryCopy"
+      RoleArn: !GetAtt StepFunctionExecutionRole.Arn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StepFunctionLogGroup.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "PopulateRepositoryList",
+          "States": {
+            "PopulateRepositoryList": {
+              "Type": "Task",
+              "Resource": "${PopulateECRRepositoryList.Arn}",
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "NotifyFailure"
+                }
+              ],
+              "Next": "GetRepositoryList"
+            },
+            "GetRepositoryList": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:dynamodb:scan",
+              "Parameters": {
+                "TableName": "${ECRRepositoryListTable}",
+                "ProjectionExpression": "repository"
+              },
+              "ResultSelector": {
+                "repositories.$": "$.Items[*].repository.S"
+              },
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "NotifyFailure"
+                }
+              ],
+              "Next": "DeduplicateRepositories"
+            },
+            "DeduplicateRepositories": {
+              "Type": "Pass",
+              "Parameters": {
+                "uniqueRepos.$": "States.ArrayUnique($.repositories)"
+              },
+              "Next": "MapRepositories"
+            },
+            "MapRepositories": {
+              "Type": "Map",
+              "ItemsPath": "$.uniqueRepos",
+              "MaxConcurrency": 3,
+              "Catch": [
+                {
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "NotifyFailure"
+                }
+              ],
+              "Iterator": {
+                "StartAt": "CopyRepository",
+                "States": {
+                  "CopyRepository": {
+                    "Type": "Task",
+                    "Resource": "${ECRImageCopyFunction.Arn}",
+                    "Parameters": {
+                      "repository.$": "$"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "IntervalSeconds": 30,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2.0
+                      }
+                    ],
+                    "End": true
+                  }
+                }
+              },
+              "Next": "NotifySuccess"
+            },
+            "NotifySuccess": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${CompletionTopic}",
+                "Message.$": "States.Format('Successfully copied {} unique repositories', States.ArrayLength($))"
+              },
+              "End": true
+            },
+            "NotifyFailure": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sns:publish",
+              "Parameters": {
+                "TopicArn": "${CompletionTopic}",
+                "Message": "ECR repository copy failed. Check CloudWatch logs for details."
+              },
+              "End": true
+            }
+          }
+        }
+      Tags:
+        - Key: Project
+          Value: ECRCopy
+        - Key: Environment
+          Value: !Ref Environment
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-ECRCopyLambdaErrors"
+      AlarmDescription: Monitor Lambda function errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ECRImageCopyFunction
+      AlarmActions:
+        - !Ref CompletionTopic
+
+  StepFunctionFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-StepFunctionFailures"
+      AlarmDescription: Monitor Step Function execution failures
+      MetricName: ExecutionsFailed
+      Namespace: AWS/States
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref ECRRepositoryCopyStateMachine
+      AlarmActions:
+        - !Ref CompletionTopic
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the Step Function State Machine
+    Value: !Ref ECRRepositoryCopyStateMachine
+
+  DynamoDBTableName:
+    Description: Name of the DynamoDB table storing repository information
+    Value: !Ref ECRRepositoryListTable
+
+  SNSTopicArn:
+    Description: ARN of the SNS topic for notifications
+    Value: !Ref CompletionTopic
+
+  ContainerImageInstructions:
+    Description: Build and push container image for Lambda
+    Value: |
+      1. Create Dockerfile:
+      FROM public.ecr.aws/lambda/python:3.12
+      RUN yum update -y && yum install -y docker
+      COPY app.py ${LAMBDA_TASK_ROOT}
+      CMD ["app.lambda_handler"]
+
+      2. Build and push:
+      docker build -t ecr-copy-lambda .
+      aws ecr create-repository --repository-name ecr-copy-lambda
+      docker tag ecr-copy-lambda:latest ACCOUNT.dkr.ecr.REGION.amazonaws.com/ecr-copy-lambda:latest
+      docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ecr-copy-lambda:latest

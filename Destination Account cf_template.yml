@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates ECR destination role to be assumed by Account A for cross-account ECR image copy
+
+Parameters:
+  SourceAccountId:
+    Type: String
+    Description: The AWS Account ID of the source account (Account A)
+    Default: "1111111111"
+
+  SourceRoleName:
+    Type: String
+    Default: ECRContainerLambdaRole
+    Description: The name of the Lambda execution role in Account A that will assume this role
+
+Resources:
+  ECRCrossAccountDestinationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ECRCrossAccountDestinationRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${SourceAccountId}:role/${SourceRoleName}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowECROperations
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:CreateRepository
+                  - ecr:PutImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: '*'
+
+Outputs:
+  CrossAccountRoleArn:
+    Description: ARN of the IAM role for cross-account ECR copy
+    Value: !GetAtt ECRCrossAccountDestinationRole.Arn
