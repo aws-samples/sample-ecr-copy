@@ -1,4 +1,4 @@
-# DockerFile to create a container for lambda 
+# DockerFile to create a Container Image for lambda 
 
 FROM public.ecr.aws/lambda/python:3.12
 

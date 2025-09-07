@@ -15,21 +15,11 @@ Parameters:
     Type: String
     Default: eu-west-2
     Description: AWS Region where ECR repositories will be copied to
-    AllowedValues: 
-    - eu-west-1
-    - eu-west-2
-    - us-east-1
-    - us-east-2
-
+    
   SourceRegion:
     Type: String
     Default: eu-west-2
     Description: AWS Region where source ECR repositories are located
-    AllowedValues: 
-      - eu-west-1
-      - eu-west-2
-      - us-east-1
-      - us-east-2
 
   NotificationEmail:
     Type: String
@@ -39,7 +29,7 @@ Parameters:
 
   RepositoryList:
     Type: CommaDelimitedList
-    Default: "php-nginx,docker-repo"
+    Default: "repo-1,repo-2"
     Description: Comma-separated list of ECR repositories to copy
     AllowedPattern: ^$|^[a-zA-Z0-9_.-]+([, ]*[a-zA-Z0-9_.-]+)*$
 

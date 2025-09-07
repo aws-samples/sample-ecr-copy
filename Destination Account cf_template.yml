@@ -39,7 +39,7 @@ Resources:
                   - ecr:UploadLayerPart
                   - ecr:CompleteLayerUpload
                 Resource: '*'
-
+                
 Outputs:
   CrossAccountRoleArn:
     Description: ARN of the IAM role for cross-account ECR copy
