@@ -15,7 +15,7 @@ Parameters:
     Type: String
     Default: eu-west-2
     Description: AWS Region where ECR repositories will be copied to
-    
+
   SourceRegion:
     Type: String
     Default: eu-west-2
@@ -429,18 +429,3 @@ Outputs:
   SNSTopicArn:
     Description: ARN of the SNS topic for notifications
     Value: !Ref CompletionTopic
-
-  ContainerImageInstructions:
-    Description: Build and push container image for Lambda
-    Value: |
-      1. Create Dockerfile:
-      FROM public.ecr.aws/lambda/python:3.12
-      RUN yum update -y && yum install -y docker
-      COPY app.py ${LAMBDA_TASK_ROOT}
-      CMD ["app.lambda_handler"]
-
-      2. Build and push:
-      docker build -t ecr-copy-lambda .
-      aws ecr create-repository --repository-name ecr-copy-lambda
-      docker tag ecr-copy-lambda:latest ACCOUNT.dkr.ecr.REGION.amazonaws.com/ecr-copy-lambda:latest
-      docker push ACCOUNT.dkr.ecr.REGION.amazonaws.com/ecr-copy-lambda:latest
