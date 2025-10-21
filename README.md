@@ -1,9 +1,11 @@
 # Copy ECR Container Images Into Cross-Account and Cross-Region AWS Accounts
 
 ## Description
-This pattern describes how to copy all tagged images from an existing Amazon ECR repository into another AWS accounts and regions using a serverless orchestration approach. The pattern uses AWS Step Functions to orchestrate the copying workflow and AWS Lambda functions to efficiently copy large container images. The solution addresses common MLOps challenges where AI teams need to distribute containerized machine learning models, frameworks (PyTorch, TensorFlow, Hugging Face), and dependencies into a new account and a new region to overcome service limits and access optimal GPU compute resources. 
+This pattern shows you how to use a serverless approach to replicate tagged images from existing Amazon Elastic Container Registry (Amazon ECR) repositories to other AWS accounts and Regions. The solution uses AWS Step Functions to manage the replication workflow and AWS Lambda functions to copy large container images.
 
-This solution enables selective copying of ECR repositories across AWS accounts and regions. For example, you can use this solution to copy specific ECR repositories from a source account and region to a destination account and a different region.
+Amazon ECR uses native [cross-Region](https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry-settings-examples.html#registry-settings-examples-crr-single) and [cross-account](https://docs.aws.amazon.com/AmazonECR/latest/userguide/registry-settings-examples.html#registry-settings-examples-crossaccount) replication features that replicate container images across Regions and accounts. But these features only replicate images from the moment replication is turned on. There is no mechanism to replicate existing images in different Regions and accounts. 
+
+This pattern helps artificial intelligence (AI) teams distribute containerized machine learning (ML) models, frameworks (for example, PyTorch, TensorFlow, and Hugging Face), and dependencies to other accounts and Regions. This can help you overcome service limits and optimize GPU compute resources. You can also selectively replicate Amazon ECR repositories from specific source accounts and Regions. For more information, see [Cross-Region replication in Amazon ECR has landed.](https://aws.amazon.com/blogs/containers/cross-region-replication-in-amazon-ecr-has-landed/)
 
 
 **The code in this repository helps you set up the following target architecture.**
