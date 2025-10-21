@@ -22,7 +22,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub arn:aws:iam::${SourceAccountId}:role/${SourceRoleName}
+              AWS: !Sub arn:aws:iam::${SourceAccountId}:root
             Action: sts:AssumeRole
       Policies:
         - PolicyName: AllowECROperations

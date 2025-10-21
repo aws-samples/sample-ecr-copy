@@ -1,6 +1,6 @@
 # DockerFile to create a Container Image for lambda 
 
-FROM public.ecr.aws/lambda/python:3.12
+FROM --platform=linux/amd64 public.ecr.aws/lambda/python:3.12
 
 # Install required tools using microdnf (Amazon Linux 2023)
 RUN microdnf update -y && \
@@ -16,7 +16,7 @@ RUN curl -L "https://github.com/google/go-containerregistry/releases/latest/down
 RUN pip install boto3
 
 # Copy Lambda function code
-COPY app.py ${LAMBDA_TASK_ROOT}
+COPY crane-app.py ${LAMBDA_TASK_ROOT}
 
 # Set the CMD to your handler
-CMD ["app.lambda_handler"]
+CMD ["crane-app.lambda_handler"]

@@ -8,6 +8,7 @@ Parameters:
     Description: AWS Account ID where source ECR repositories are located
 
   DestinationAccountId:
+    Type: String
     Default: '2222222222'
     Description: AWS Account ID where ECR repositories will be copied to
 
@@ -36,8 +37,7 @@ Parameters:
   LambdaImageUri:
     Type: String
     Description: ECR URI for Lambda container image
-    Default: ${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/ecr-copy-lambda:latest
-    AllowedPattern: ^$|[a-zA-Z0-9_.-]+\.dkr\.ecr\.[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+:[a-zA-Z0-9_.-]+
+    Default: 123456789012.dkr.ecr.eu-west-2.amazonaws.com/ecr-copy-lambda:latest
 
   Environment:
     Type: String
@@ -81,6 +81,12 @@ Resources:
                   - ecr:ListImages
                   - ecr:ListTagsForResource
                   - ecr:TagResource
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
                 Resource: '*'
               - Effect: Allow
                 Action:
