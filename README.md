@@ -13,7 +13,7 @@ This pattern helps artificial intelligence (AI) teams distribute containerized m
 
 ![Target architecture diagram](architecture/ECR%20Copy%20Cross%20Account.jpg) 
 
-## For prerequisites and instructions for using this AWS Prescriptive Guidance pattern, see [Copy ECR Container Images Into Cross-Account and Cross-Region AWS Accounts](https://apg-library.amazonaws.com/content-viewer/787185e7-664b-4ed8-b30f-1d9507f13377).
+## For prerequisites and instructions for using this AWS Prescriptive Guidance pattern, see [Copy ECR Container Images Into Cross-Account and Cross-Region AWS Accounts](https://apg-library.amazonaws.com/content/787185e7-664b-4ed8-b30f-1d9507f13377).
 
 ## Security
 
